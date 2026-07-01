@@ -63,13 +63,37 @@ RUN chmod +x /root-out/opt/utils/healthcheck.sh \
 FROM alpine:${ALPINE_VERSION}
 ARG THREE_PROXY_BRANCH
 
+# openconnect >= 9.20 is required for Cisco "strap" / SSPKI key-bound sessions
+# (e.g. UCLA Bruin VPN — the SSO cookie carries an openconnect_strapkey the
+# client must present on connect). Alpine's package lags (<= 9.12, no strap),
+# so build openconnect from source.
+ARG OPENCONNECT_VERSION=9.21
+
 RUN apk upgrade --update --no-cache \
     && apk --update --no-cache add \
         bash \
         tzdata \
-        openconnect \
         dnsmasq \
-    && rm -rf /var/cache/apk/*
+        gnutls \
+        libxml2 \
+        zlib \
+    && apk --no-cache add --virtual .oc-build \
+        build-base curl pkgconf gnutls-dev libxml2-dev zlib-dev linux-headers \
+    && curl -fL "https://www.infradead.org/openconnect/download/openconnect-${OPENCONNECT_VERSION}.tar.gz" -o /tmp/oc.tar.gz \
+    && mkdir -p /tmp/oc \
+    && tar -xf /tmp/oc.tar.gz -C /tmp/oc --strip-components=1 \
+    && cd /tmp/oc \
+    && ./configure --prefix=/usr \
+        --with-vpnc-script=/etc/vpnc/vpnc-script \
+        --disable-nls --without-libpcsclite --without-gssapi \
+        --without-libproxy --without-stoken --without-libp11 \
+    && make -j"$(nproc)" \
+    && make install \
+    && cd / \
+    && rm -rf /tmp/oc /tmp/oc.tar.gz \
+    && apk del .oc-build \
+    && rm -rf /var/cache/apk/* \
+    && openconnect --version | head -1
 
 COPY --from=builder /3proxy-${THREE_PROXY_BRANCH}/bin /usr/local/bin
 COPY --from=builder /root-out /

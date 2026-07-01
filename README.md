@@ -1,6 +1,7 @@
 # AnyConnect, Pulse and PAN container with proxies
 ## Changelog
 
+- v20260701b: Build openconnect **v9.21** from source instead of the Alpine package (which lags at v9.12). Required for Cisco **strap / SSPKI** key-bound sessions — the SSO cookie carries an `openconnect_strapkey` the client must present on connect, so the fetch-side and container openconnect must both support strap (>= ~v9.20). Without it the tunnel connect returns `HTTP/1.1 401 Unauthorized` ("Cookie was rejected by server"). Override with `--build-arg OPENCONNECT_VERSION=`.
 - v20260701: Add SAML/SSO (Shibboleth) support via `AUTH_MODE=cookie`. A session cookie obtained on a machine with a browser (e.g. `openconnect --external-browser=open --cookieonly`) is written to `/vpn/token` and fed to openconnect with `--cookie-on-stdin`. Add a configurable `USER_AGENT`. Needed for head-ends that have disabled plain username/password auth (e.g. UCLA Bruin VPN).
 - v20230405: Add an override OpenSSL3 configuration to get around `routines::unsafe legacy renegotiation disabled` error.
 - v20230402: Update to `s6-overlay` version 3. Latest [`vpnc-script`](https://gitlab.com/openconnect/vpnc-scripts)
