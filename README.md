@@ -169,10 +169,13 @@ The container picks the cookie up within ~2s, brings up `tun0`, and the proxies
 start serving. Re-run when the session expires.
 
 > **Note on client-IP binding:** some Cisco head-ends tie the session to the IP
-> that performed the SSO login. If cookies fetched on your laptop are rejected
-> by the server, run the `--cookieonly` command *from the server's network* —
-> e.g. via `ssh -L` port-forwarding of openconnect's `--external-browser`
-> callback so the auth originates from the server's IP.
+> that performed the SSO login, so a cookie fetched on your laptop is rejected
+> (`HTTP/1.1 401 Unauthorized`, "Cookie was rejected by server") when the
+> container connects from the server's IP. Fix: make openconnect's control
+> connection egress from the server. Open an SSH SOCKS proxy through the server
+> (`ssh -D 1080 -N user@server`) and add `--proxy socks5://127.0.0.1:1080` to
+> the `--cookieonly` command; the resulting cookie is then bound to the server's
+> IP. Complete the browser SSO as usual.
 
 ## Connecting to the VPN Proxy
 

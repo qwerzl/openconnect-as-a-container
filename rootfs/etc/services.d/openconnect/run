@@ -30,25 +30,32 @@ if [ "${AUTH_MODE}" = "cookie" ]; then
   #   openconnect --protocol=anyconnect --useragent="$UA" \
   #     --external-browser=open --cookieonly ssl.vpn.ucla.edu
   # then write that cookie into /vpn/token (see README).
-  echo "[cookie mode] Waiting for SAML session cookie in /vpn/token ..."
-  read COOKIE < /vpn/token
-  while [ -z "${COOKIE}" ]; do
-    sleep 2
+  #
+  # Loop so that after any disconnect / expired or rejected cookie the service
+  # goes back to waiting for a fresh cookie instead of dying (s6 keeps it up).
+  while true; do
+    echo "[cookie mode] Waiting for SAML session cookie in /vpn/token ..."
     read COOKIE < /vpn/token
-  done
-  # strip trailing CR/LF, if any
-  COOKIE="${COOKIE%$'\r'}"
-  COOKIE="${COOKIE%$'\n'}"
-  echo "[cookie mode] Cookie received (${#COOKIE} chars). Clearing token file."
-  : > /vpn/token
+    while [ -z "${COOKIE}" ]; do
+      sleep 2
+      read COOKIE < /vpn/token
+    done
+    # strip trailing CR/LF, if any
+    COOKIE="${COOKIE%$'\r'}"
+    COOKIE="${COOKIE%$'\n'}"
+    echo "[cookie mode] Cookie received (${#COOKIE} chars). Clearing token file."
+    : > /vpn/token
 
-  echo "Starting openconnect..."
-  printf '%s\n' "${COOKIE}" | openconnect "${SERVER}" \
-    --protocol=anyconnect \
-    --useragent="${UA}" \
-    --cookie-on-stdin \
-    --pid-file=${OC_PID} \
-    --no-dtls
+    echo "Starting openconnect..."
+    printf '%s\n' "${COOKIE}" | openconnect "${SERVER}" \
+      --protocol=anyconnect \
+      --useragent="${UA}" \
+      --cookie-on-stdin \
+      --pid-file=${OC_PID} \
+      --no-dtls
+
+    echo "[cookie mode] openconnect exited. Waiting for a new cookie..."
+  done
 
 else
   # ---- Username / password (+ optional dynamic token) mode ---------------
