@@ -12,40 +12,81 @@ if [ -z "$SERVER" ]; then
   exit 1
 fi
 
-if [ -z "$USERNAME" ]; then
-  echo "No username is set. Exiting."
-  exit 1
+# User-Agent openconnect presents to the head-end. Some SSO/SAML gateways only
+# offer the browser-based (Shibboleth) login when they see a real client UA.
+UA="${USER_AGENT:-AnyConnect Windows 4.10.05111}"
+
+# AUTH_MODE selects how we authenticate:
+#   password (default) - username + password (+ optional dynamic 2FA token)
+#   cookie             - SAML/SSO: a pre-obtained session cookie is fed to
+#                        openconnect via --cookie-on-stdin
+AUTH_MODE="${AUTH_MODE:-password}"
+
+if [ "${AUTH_MODE}" = "cookie" ]; then
+  # ---- SAML / SSO (e.g. Shibboleth) cookie mode --------------------------
+  # The head-end has disabled plain username/password and hands clients off to
+  # an IdP (UCLA Bruin VPN does this). Obtain a session cookie on a machine
+  # with a browser, e.g.:
+  #   openconnect --protocol=anyconnect --useragent="$UA" \
+  #     --external-browser=open --cookieonly ssl.vpn.ucla.edu
+  # then write that cookie into /vpn/token (see README).
+  echo "[cookie mode] Waiting for SAML session cookie in /vpn/token ..."
+  read COOKIE < /vpn/token
+  while [ -z "${COOKIE}" ]; do
+    sleep 2
+    read COOKIE < /vpn/token
+  done
+  # strip trailing CR/LF, if any
+  COOKIE="${COOKIE%$'\r'}"
+  COOKIE="${COOKIE%$'\n'}"
+  echo "[cookie mode] Cookie received (${#COOKIE} chars). Clearing token file."
+  : > /vpn/token
+
+  echo "Starting openconnect..."
+  printf '%s\n' "${COOKIE}" | openconnect "${SERVER}" \
+    --protocol=anyconnect \
+    --useragent="${UA}" \
+    --cookie-on-stdin \
+    --pid-file=${OC_PID} \
+    --no-dtls
+
+else
+  # ---- Username / password (+ optional dynamic token) mode ---------------
+  if [ -z "$USERNAME" ]; then
+    echo "No username is set. Exiting."
+    exit 1
+  fi
+
+  if [ -z "$PASSWORD" ]; then
+    echo "No password is set. Exiting."
+    exit 1
+  fi
+
+  echo "Reading token..."
+  read TOKEN < /vpn/token
+  while [ -z ${TOKEN} ]; do
+    sleep 1;
+    read TOKEN < /vpn/token;
+  done
+  echo "Token provided as ${TOKEN}"
+
+  if [ "${DYNAMIC_TOKEN}" = true ]; then
+    echo "Resetting token for next use..."
+    echo "" > /vpn/token
+  fi
+  # Remove trailing newline, if any
+  SANED_VARS=( PASSWORD TOKEN )
+  for i in "${SANED_VARS[@]}"
+  do
+    export "$i"="${!i%$'\n'}"
+  done
+
+  echo "Starting openconnect..."
+  (
+    echo -e "${PASSWORD}\n${TOKEN}\n"
+    read -s
+  ) | openconnect ${SERVER} --useragent="${UA}" --pid-file=${OC_PID} --user=${USERNAME} --passwd-on-stdin --no-dtls
 fi
-
-if [ -z "$PASSWORD" ]; then
-  echo "No password is set. Exiting."
-  exit 1
-fi
-
-echo "Reading token..."
-read TOKEN < /vpn/token
-while [ -z ${TOKEN} ]; do
-  sleep 1;
-  read TOKEN < /vpn/token;
-done
-echo "Token provided as ${TOKEN}"
-
-if [ ${DYNAMIC_TOKEN} = true ]; then
-  echo "Resetting token for next use..."
-  echo "" > /vpn/token
-fi
-# Remove trailing newline, if any
-SANED_VARS=( PASSWORD TOKEN )
-for i in "${SANED_VARS[@]}"
-do
-  export "$i"="${!i%$'\n'}"
-done
-
-echo "Starting openconnect..."
-(
-  echo -e "${PASSWORD}\n${TOKEN}\n"
-  read -s
-) | openconnect ${SERVER} --pid-file=${OC_PID} --user=${USERNAME} --passwd-on-stdin --no-dtls
 
 sleep infinity &
 

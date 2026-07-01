@@ -1,6 +1,7 @@
 # AnyConnect, Pulse and PAN container with proxies
 ## Changelog
 
+- v20260701: Add SAML/SSO (Shibboleth) support via `AUTH_MODE=cookie`. A session cookie obtained on a machine with a browser (e.g. `openconnect --external-browser=open --cookieonly`) is written to `/vpn/token` and fed to openconnect with `--cookie-on-stdin`. Add a configurable `USER_AGENT`. Needed for head-ends that have disabled plain username/password auth (e.g. UCLA Bruin VPN).
 - v20230405: Add an override OpenSSL3 configuration to get around `routines::unsafe legacy renegotiation disabled` error.
 - v20230402: Update to `s6-overlay` version 3. Latest [`vpnc-script`](https://gitlab.com/openconnect/vpnc-scripts)
 - v20220603: Add a `build.sh` script. Set s6-overlay version to 2.2.0.3. Update to version 3 pending.
@@ -55,6 +56,8 @@ The main configuration file, contain the following values:
 - `PROXY_USER`: Proxy username (optional).
 - `PROXY_PASS`: Proxy password.
 - `KEEP_ALIVE_ENDPOINT`: An endpoint (can be internal or external) to keep the VPN connection alive
+- `AUTH_MODE`: `password` (default) or `cookie`. See [SAML / SSO (cookie) mode](#saml--sso-cookie-mode).
+- `USER_AGENT`: User-Agent openconnect presents to the head-end. Defaults to `AnyConnect Windows 4.10.05111`. Some SSO/SAML gateways only offer the browser (Shibboleth) login flow to a recognised client UA.
 
 ### Environment variables
 
@@ -122,6 +125,54 @@ Token is taken from the file `/vpn/token` within the container. If `DYNAMIC_TOKE
 ```Shell
 echo OTP_HERE > ./vpntoken
 ```
+
+## SAML / SSO (cookie) mode
+
+Some head-ends have disabled plain username/password login and hand clients off
+to a SAML IdP / Shibboleth SSO flow in a browser (e.g. **UCLA Bruin VPN**,
+`ssl.vpn.ucla.edu`). openconnect cannot complete an interactive browser login
+from inside a headless container, so this image supports feeding it a
+**pre-obtained session cookie** instead.
+
+Set `AUTH_MODE=cookie` in `vpn.config`. The `openconnect` service then waits for
+a cookie to appear in `/vpn/token` and connects with `--cookie-on-stdin`
+(`USERNAME`/`PASSWORD` are ignored in this mode).
+
+### 1. Obtain a cookie on a machine with a browser
+
+Install openconnect v9+ locally (`brew install openconnect`, `apt install
+openconnect`, …) and run, using the **same** `USER_AGENT` as the container:
+
+```Shell
+openconnect --protocol=anyconnect \
+  --useragent='AnyConnect Windows 4.10.05111' \
+  --external-browser=open --cookieonly \
+  ssl.vpn.ucla.edu
+```
+
+Your browser opens the SSO login (university logon + MFA). On success,
+openconnect prints **only the session cookie** to stdout (`--cookieonly` means
+it authenticates without connecting, so no root/sudo is needed).
+
+### 2. Deliver the cookie to the container
+
+Pipe it straight into `vpntoken` (keeps it off your clipboard):
+
+```Shell
+openconnect --protocol=anyconnect \
+  --useragent='AnyConnect Windows 4.10.05111' \
+  --external-browser=open --cookieonly ssl.vpn.ucla.edu \
+  | ssh user@your-server 'cat > /path/to/vpntoken'
+```
+
+The container picks the cookie up within ~2s, brings up `tun0`, and the proxies
+start serving. Re-run when the session expires.
+
+> **Note on client-IP binding:** some Cisco head-ends tie the session to the IP
+> that performed the SSO login. If cookies fetched on your laptop are rejected
+> by the server, run the `--cookieonly` command *from the server's network* —
+> e.g. via `ssh -L` port-forwarding of openconnect's `--external-browser`
+> callback so the auth originates from the server's IP.
 
 ## Connecting to the VPN Proxy
 
